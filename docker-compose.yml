@@ -1,0 +1,97 @@
+version: '3.8'
+
+services:
+  # Database
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: ai_voice_assistant
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # Call Handler Service
+  call-handler:
+    build:
+      context: .
+      dockerfile: call_handler/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/ai_voice_assistant
+      - STT_SERVICE_URL=http://stt-service:8001
+      - TTS_SERVICE_URL=http://tts-service:8002
+      - NLU_SERVICE_URL=http://nlu-service:8003
+      - APPOINTMENT_SERVICE_URL=http://appointment-service:8004
+      - SMS_SERVICE_URL=http://sms-service:8005
+    depends_on:
+      - postgres
+      - stt-service
+      - tts-service
+      - nlu-service
+      - appointment-service
+      - sms-service
+
+  # Speech-to-Text Service
+  stt-service:
+    build:
+      context: .
+      dockerfile: stt_service/Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}
+
+  # Text-to-Speech Service
+  tts-service:
+    build:
+      context: .
+      dockerfile: tts_service/Dockerfile
+    ports:
+      - "8002:8002"
+    environment:
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}
+
+  # Natural Language Understanding Service
+  nlu-service:
+    build:
+      context: .
+      dockerfile: nlu_service/Dockerfile
+    ports:
+      - "8003:8003"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+
+  # Appointment Service
+  appointment-service:
+    build:
+      context: .
+      dockerfile: appointment_service/Dockerfile
+    ports:
+      - "8004:8004"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/ai_voice_assistant
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS}
+    depends_on:
+      - postgres
+
+  # SMS Service
+  sms-service:
+    build:
+      context: .
+      dockerfile: sms_service/Dockerfile
+    ports:
+      - "8005:8005"
+    environment:
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN}
+
+volumes:
+  postgres_data:

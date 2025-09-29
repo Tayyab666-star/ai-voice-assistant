@@ -1,0 +1,202 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database (Local)
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: voice_assistant
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache (Local)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Web Interface (Main UI)
+  web-interface:
+    build:
+      context: .
+      dockerfile: web_interface/Dockerfile.local
+    ports:
+      - "3000:3000"
+    environment:
+      - WEB_INTERFACE_PORT=3000
+      - LOCAL_FREE_MODE=true
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/voice_assistant
+    volumes:
+      - ./web_interface:/app
+      - ./data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Local STT Service (Whisper)
+  stt-service:
+    build:
+      context: .
+      dockerfile: stt_service/Dockerfile.local
+    ports:
+      - "8002:8002"
+    environment:
+      - USE_LOCAL_MODELS=true
+      - WHISPER_MODEL=base
+      - WHISPER_DEVICE=cpu
+      - MODEL_CACHE_DIR=/app/models
+    volumes:
+      - ./models:/app/models
+      - ./data:/app/data
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+
+  # Local TTS Service (Coqui)
+  tts-service:
+    build:
+      context: .
+      dockerfile: tts_service/Dockerfile.local
+    ports:
+      - "8003:8003"
+    environment:
+      - USE_LOCAL_MODELS=true
+      - TTS_ENGINE=coqui
+      - MODEL_CACHE_DIR=/app/models
+    volumes:
+      - ./models:/app/models
+      - ./data:/app/data
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+
+  # Local NLU Service (spaCy)
+  nlu-service:
+    build:
+      context: .
+      dockerfile: nlu_service/Dockerfile.local
+    ports:
+      - "8004:8004"
+    environment:
+      - USE_LOCAL_MODELS=true
+      - NLU_ENGINE=spacy
+      - SPACY_MODEL=en_core_web_sm
+      - MODEL_CACHE_DIR=/app/models
+    volumes:
+      - ./models:/app/models
+      - ./data:/app/data
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+  # Appointment Service
+  appointment-service:
+    build:
+      context: .
+      dockerfile: appointment_service/Dockerfile
+    ports:
+      - "8005:8005"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/voice_assistant
+      - REDIS_URL=redis://redis:6379
+      - LOCAL_FREE_MODE=true
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Call Handler Service (Local Mode)
+  call-handler:
+    build:
+      context: .
+      dockerfile: call_handler/Dockerfile.local
+    ports:
+      - "8001:8001"
+    environment:
+      - LOCAL_FREE_MODE=true
+      - SIMULATE_CALLS=true
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/voice_assistant
+      - REDIS_URL=redis://redis:6379
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      stt-service:
+        condition: service_started
+      tts-service:
+        condition: service_started
+      nlu-service:
+        condition: service_started
+      appointment-service:
+        condition: service_started
+    restart: unless-stopped
+
+  # SMS Service (Simulation Mode)
+  sms-service:
+    build:
+      context: .
+      dockerfile: sms_service/Dockerfile.local
+    ports:
+      - "8006:8006"
+    environment:
+      - LOCAL_FREE_MODE=true
+      - SIMULATE_SMS=true
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  default:
+    name: ai-voice-assistant-local

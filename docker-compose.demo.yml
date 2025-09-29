@@ -1,0 +1,178 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: voice_assistant
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Demo Web Interface
+  web-interface:
+    build:
+      context: .
+      dockerfile: web_interface/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - WEB_INTERFACE_PORT=3000
+      - DEMO_MODE=true
+    volumes:
+      - ./web_interface:/app
+    depends_on:
+      - postgres
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Call Handler Service (Demo Mode)
+  call-handler:
+    build:
+      context: .
+      dockerfile: call_handler/Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      - DEMO_MODE=true
+      - SIMULATE_CALLS=true
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/voice_assistant
+      - REDIS_URL=redis://redis:6379
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # STT Service (Demo Mode - Local Models)
+  stt-service:
+    build:
+      context: .
+      dockerfile: stt_service/Dockerfile.demo
+    ports:
+      - "8002:8002"
+    environment:
+      - USE_LOCAL_MODELS=true
+      - WHISPER_MODEL=base
+      - DEMO_MODE=true
+    volumes:
+      - ./models:/app/models
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # TTS Service (Demo Mode - Local Models)
+  tts-service:
+    build:
+      context: .
+      dockerfile: tts_service/Dockerfile.demo
+    ports:
+      - "8003:8003"
+    environment:
+      - USE_LOCAL_MODELS=true
+      - TTS_ENGINE=coqui
+      - DEMO_MODE=true
+    volumes:
+      - ./models:/app/models
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # NLU Service (Demo Mode - Local Models)
+  nlu-service:
+    build:
+      context: .
+      dockerfile: nlu_service/Dockerfile.demo
+    ports:
+      - "8004:8004"
+    environment:
+      - USE_LOCAL_MODELS=true
+      - NLU_ENGINE=spacy
+      - DEMO_MODE=true
+    volumes:
+      - ./models:/app/models
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Appointment Service
+  appointment-service:
+    build:
+      context: .
+      dockerfile: appointment_service/Dockerfile
+    ports:
+      - "8005:8005"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/voice_assistant
+      - REDIS_URL=redis://redis:6379
+      - DEMO_MODE=true
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # SMS Service (Demo Mode - Simulated)
+  sms-service:
+    build:
+      context: .
+      dockerfile: sms_service/Dockerfile
+    ports:
+      - "8006:8006"
+    environment:
+      - DEMO_MODE=true
+      - SIMULATE_SMS=true
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8006/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  postgres_data:
+
+networks:
+  default:
+    name: ai-voice-assistant-demo
